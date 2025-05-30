@@ -4,6 +4,12 @@ __pycache__/
 *$py.class
 *.so
 .Python
+
+# JWST data files
+cached_data/
+mastDownload/
+
+# Development
 env/
 build/
 develop-eggs/
@@ -19,11 +25,6 @@ var/
 *.egg-info/
 .installed.cfg
 *.egg
-
-# FITS files and downloaded data
-cached_data/
-mastDownload/
-*.fits
 
 # Virtual Environment
 venv/
