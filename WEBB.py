@@ -1,0 +1,231 @@
+# 1. Query and Download JWST NIRCam Data
+from astroquery.mast import Observations
+from astropy.io import fits
+from astropy.visualization import (MinMaxInterval, LogStretch, ImageNormalize, AsinhStretch)
+from astropy.wcs import WCS
+import matplotlib.pyplot as plt
+from photutils.segmentation import detect_sources, SourceCatalog, detect_threshold
+import numpy as np
+import os
+from multiprocessing import Pool
+import functools
+import gc
+
+# Configure matplotlib for better performance
+plt.rcParams['figure.dpi'] = 100  # Lower DPI for faster rendering
+plt.rcParams['figure.figsize'] = (8, 8)  # Smaller figure size
+plt.rcParams['figure.max_open_warning'] = 10  # Reduce memory usage from many plots
+
+# Configuration
+PERFORM_SOURCE_DETECTION = True  # Set to False to skip source detection
+COLOR_MODE = 'grayscale'  # Options: 'grayscale', 'false_color'
+
+# Available targets (famous JWST observations)
+TARGETS = {
+    'SMACS': {
+        'name': 'SMACS J0723.3-7327',
+        'description': 'Galaxy cluster SMACS 0723'
+    },
+    'CARINA': {
+        'name': 'NGC 3324',
+        'description': 'Carina Nebula'
+    },
+    'CARTWHEEL': {
+        'name': 'ESO 350-40',
+        'description': 'Cartwheel Galaxy'
+    },
+    'PILLARS': {
+        'name': 'M16',
+        'description': 'Pillars of Creation in Eagle Nebula'
+    },
+    'STEPHAN': {
+        'name': "Stephan's Quintet",
+        'description': 'Compact galaxy group HCG 92'
+    },
+    'SOUTHERN': {
+        'name': 'NGC 7469',
+        'description': 'Southern Ring Nebula'
+    }
+}
+
+# Select target
+print("Available targets:")
+for key, value in TARGETS.items():
+    print(f"{key}: {value['description']}")
+    
+target_key = input("Select target (SMACS/CARINA/CARTWHEEL/PILLARS/STEPHAN/SOUTHERN) [default=SMACS]: ").upper() or 'SMACS'
+target = TARGETS[target_key]['name']
+
+print(f"\nSelected target: {target}")
+
+# Check for cached data first
+cache_dir = "cached_data"
+cache_file = os.path.join(cache_dir, f"{target.replace(' ', '_')}.fits")
+
+if os.path.exists(cache_file):
+    print("Using cached file...")
+    fits_path = cache_file
+else:
+    print("Starting JWST data query...")
+    try:
+        # Search with a larger radius since SMACS 0723 is a cluster
+        obs_table = Observations.query_object(target, radius='0.1 deg')
+        print(f"Found {len(obs_table)} observations")
+
+        # More flexible filter search - just look for JWST images
+        jwst_obs = obs_table[
+            (obs_table['obs_collection'] == 'JWST') &
+            (obs_table['dataproduct_type'] == 'image')
+        ]
+
+        print(f"\nFound {len(jwst_obs)} JWST images total")
+
+        if len(jwst_obs) > 0:
+            print("Downloading calibrated image...")
+            products = Observations.get_product_list(jwst_obs[0])
+            print(f"\nAvailable product types:", np.unique(products['productSubGroupDescription']))
+            calib_products = Observations.filter_products(products, 
+                                                       productSubGroupDescription=['CAL'],
+                                                       extension='fits')
+            if len(calib_products) > 0:
+                download_manifest = Observations.download_products(calib_products[:1], mrp_only=False)
+                fits_path = download_manifest['Local Path'][0]
+                # Cache the downloaded file
+                os.makedirs(cache_dir, exist_ok=True)
+                os.rename(fits_path, cache_file)
+                fits_path = cache_file
+                print(f"Downloaded and cached file to: {fits_path}")
+            else:
+                raise ValueError("No calibrated products found for the first JWST observation.")
+        else:
+            raise ValueError("No matching JWST observations found!")
+            
+    except Exception as e:
+        if os.path.exists(cache_file):
+            print(f"Error querying MAST: {str(e)}")
+            print("Using cached file instead...")
+            fits_path = cache_file
+        else:
+            raise Exception(f"Error querying MAST and no cached file available: {str(e)}")
+
+# 2. Read and Display the Calibrated Image
+print("\nReading FITS file...")
+hdu = fits.open(fits_path)
+data = hdu[1].data  # JWST NIRCam images are often in extension 1
+wcs = WCS(hdu[1].header)
+
+# 3. Apply Contrast Stretching
+if COLOR_MODE == 'grayscale':
+    norm = ImageNormalize(data, interval=MinMaxInterval(), stretch=LogStretch())
+elif COLOR_MODE == 'true_color':
+    # For true color, calculate the section sizes to ensure even division
+    h, w = data.shape
+    section_size = h // 3  # Integer division
+    remainder = h % 3
+    
+    # Create sections with adjusted sizes to handle any remainder
+    section_starts = [0]
+    for i in range(3):
+        # Add an extra pixel to some sections if there's a remainder
+        extra = 1 if i < remainder else 0
+        section_starts.append(section_starts[-1] + section_size + extra)
+    
+    # Extract the RGB channels
+    r = data[section_starts[0]:section_starts[1], :]
+    g = data[section_starts[1]:section_starts[2], :]
+    b = data[section_starts[2]:section_starts[3], :]
+    
+    # Create and fill the RGB array
+    rgb_data = np.zeros((h, w, 3))
+    
+    # Normalize each channel individually
+    for i, channel in enumerate([r, g, b]):
+        start_idx = section_starts[i]
+        end_idx = section_starts[i + 1]
+        norm = ImageNormalize(channel, interval=MinMaxInterval(), stretch=AsinhStretch())
+        rgb_data[start_idx:end_idx, :, i] = norm(channel)
+    
+    # No need for additional normalization
+    norm = None
+elif COLOR_MODE == 'false_color':
+    # For false color, we can use the original data with a different colormap
+    norm = ImageNormalize(data, interval=MinMaxInterval(), stretch=LogStretch())
+else:
+    raise ValueError("Invalid COLOR_MODE. Choose from 'grayscale', 'true_color', or 'false_color'.")
+
+# 4. Display with WCSAxes, overlay celestial coordinates and scale bar
+fig = plt.figure(figsize=(20, 7))
+
+# Create two subplots for different visualization modes
+visualizations = [
+    ('Grayscale', 'gray', LogStretch()),
+    ('False Color', 'inferno', LogStretch())
+]
+
+for idx, (title, cmap, stretch) in enumerate(visualizations, 1):
+    ax = plt.subplot(1, 3, idx, projection=wcs)
+    
+    norm = ImageNormalize(data, interval=MinMaxInterval(), stretch=stretch)
+    im = ax.imshow(data, norm=norm, origin='lower', cmap=cmap)
+    
+    # Add coordinate labels and title
+    ax.set_xlabel('RA')
+    ax.set_ylabel('Dec')
+    ax.set_title(f'{title} View: {target}')
+    
+    # Add scale bar
+    scale_bar_length = 5  # arcseconds
+    scale_bar_length_deg = scale_bar_length / 3600
+    pix_scale = np.abs(wcs.wcs.cdelt[0])
+    scale_bar_length_pix = scale_bar_length_deg / pix_scale
+    
+    y_pos = int(data.shape[0] * 0.1)
+    x_start = int(data.shape[1] * 0.7)
+    x_end = x_start + int(scale_bar_length_pix)
+    
+    ax.plot([x_start, x_end], [y_pos, y_pos], '-w', linewidth=2)
+    ax.text(x_start + scale_bar_length_pix/2, y_pos + data.shape[0]*0.02,
+            f"{scale_bar_length}\"", color='white', ha='center', va='bottom')
+    
+    # Add colorbar for grayscale and false color
+    if title != 'True Color':
+        plt.colorbar(im, ax=ax, orientation='vertical', fraction=0.046, pad=0.04, label='Counts')
+
+plt.tight_layout()
+plt.show()
+
+# Helper function for parallel source detection
+def detect_sources_parallel(data, threshold, npixels):
+    # Split image into chunks
+    chunks = np.array_split(data, 4)  # Split into 4 sections
+    with Pool(processes=4) as pool:
+        detect_func = functools.partial(detect_sources, threshold=threshold, npixels=npixels)
+        results = pool.map(detect_func, chunks)
+    return results
+
+# 5. Use photutils for Source Detection
+if PERFORM_SOURCE_DETECTION:
+    print("\nPerforming source detection...")
+    threshold = detect_threshold(data, nsigma=3)
+    segm = detect_sources(data, threshold, npixels=10)
+    cat = SourceCatalog(data, segm, wcs=wcs)
+    print(f"Detected {len(cat)} sources.")
+
+    # Overlay segmentation map
+    plt.figure(figsize=(10, 10))
+    ax2 = plt.subplot(projection=wcs)
+    ax2.imshow(segm.data, origin='lower', cmap='nipy_spectral', alpha=0.5)
+    ax2.set_title('Source Detection Map')
+    plt.show()
+
+    # Clean up memory
+    del segm
+    del cat
+    gc.collect()
+else:
+    print("Skipping source detection...")
+
+# Clean up memory
+del data
+hdu.close()
+gc.collect()
