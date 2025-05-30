@@ -21,8 +21,9 @@ var/
 *.egg
 
 # FITS files and downloaded data
-cached_data/*.fits
+cached_data/
 mastDownload/
+*.fits
 
 # Virtual Environment
 venv/
