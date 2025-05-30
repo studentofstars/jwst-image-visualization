@@ -10,6 +10,8 @@ import os
 from multiprocessing import Pool
 import functools
 import gc
+import time
+from astroquery.exceptions import TimeoutError as AstroQueryTimeout
 
 # Configure matplotlib for better performance
 plt.rcParams['figure.dpi'] = 100  # Lower DPI for faster rendering
@@ -45,6 +47,15 @@ TARGETS = {
     'SOUTHERN': {
         'name': 'NGC 7469',
         'description': 'Southern Ring Nebula'
+    },
+    'ORION': {
+        'name': 'NGC 1976',
+        'description': 'Orion Nebula'
+    
+    },
+    'PANDORA': {
+        'name': 'Pandora Cluster',
+        'description': 'Abell 2744 galaxy cluster'
     }
 }
 
@@ -53,7 +64,7 @@ print("Available targets:")
 for key, value in TARGETS.items():
     print(f"{key}: {value['description']}")
     
-target_key = input("Select target (SMACS/CARINA/CARTWHEEL/PILLARS/STEPHAN/SOUTHERN) [default=SMACS]: ").upper() or 'SMACS'
+target_key = input("Select target (SMACS/CARINA/CARTWHEEL/PILLARS/STEPHAN/SOUTHERN/ORION/PANDORA) [default=SMACS]: ").strip().upper() or 'SMACS'
 target = TARGETS[target_key]['name']
 
 print(f"\nSelected target: {target}")
@@ -66,17 +77,44 @@ if os.path.exists(cache_file):
     print("Using cached file...")
     fits_path = cache_file
 else:
-    print("Starting JWST data query...")
-    try:
-        # Search with a larger radius since SMACS 0723 is a cluster
-        obs_table = Observations.query_object(target, radius='0.1 deg')
-        print(f"Found {len(obs_table)} observations")
+    print("Starting JWST data query...") 
+    # Configure longer timeout
+    Observations.TIMEOUT = 1200  # 20 minutes
+    max_retries = 3
+    retry_delay = 5  # seconds
+    attempt = 0
 
-        # More flexible filter search - just look for JWST images
-        jwst_obs = obs_table[
-            (obs_table['obs_collection'] == 'JWST') &
-            (obs_table['dataproduct_type'] == 'image')
-        ]
+    try:
+        while attempt < max_retries:
+            try:
+                print(f"Attempt {attempt + 1}/{max_retries}...")
+                # Search with more specific constraints
+                obs_table = Observations.query_object(target, radius='0.1 deg')
+                print(f"Found {len(obs_table)} observations")
+
+                # Filter for JWST observations
+                jwst_obs = obs_table[obs_table['obs_collection'] == 'JWST']
+
+                # Further filter for images
+                if 'dataproduct_type' in jwst_obs.colnames:
+                    jwst_obs = jwst_obs[jwst_obs['dataproduct_type'] == 'image']
+
+                # Filter for NIRCam images if possible
+                if 'instrument_name' in jwst_obs.colnames:
+                    nircam_obs = jwst_obs[jwst_obs['instrument_name'] == 'NIRCAM']
+                    if len(nircam_obs) > 0:
+                        jwst_obs = nircam_obs
+
+                break  # If successful, exit the retry loop
+
+            except (TimeoutError, AstroQueryTimeout) as e:
+                attempt += 1
+                if attempt < max_retries:
+                    print(f"Timeout occurred. Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    raise TimeoutError("All retry attempts failed")
 
         print(f"\nFound {len(jwst_obs)} JWST images total")
 
@@ -85,8 +123,8 @@ else:
             products = Observations.get_product_list(jwst_obs[0])
             print(f"\nAvailable product types:", np.unique(products['productSubGroupDescription']))
             calib_products = Observations.filter_products(products, 
-                                                       productSubGroupDescription=['CAL'],
-                                                       extension='fits')
+                                                                       productSubGroupDescription=['CAL'],
+                extension='fits')
             if len(calib_products) > 0:
                 download_manifest = Observations.download_products(calib_products[:1], mrp_only=False)
                 fits_path = download_manifest['Local Path'][0]
@@ -117,81 +155,49 @@ wcs = WCS(hdu[1].header)
 # 3. Apply Contrast Stretching
 if COLOR_MODE == 'grayscale':
     norm = ImageNormalize(data, interval=MinMaxInterval(), stretch=LogStretch())
-elif COLOR_MODE == 'true_color':
-    # For true color, calculate the section sizes to ensure even division
-    h, w = data.shape
-    section_size = h // 3  # Integer division
-    remainder = h % 3
-    
-    # Create sections with adjusted sizes to handle any remainder
-    section_starts = [0]
-    for i in range(3):
-        # Add an extra pixel to some sections if there's a remainder
-        extra = 1 if i < remainder else 0
-        section_starts.append(section_starts[-1] + section_size + extra)
-    
-    # Extract the RGB channels
-    r = data[section_starts[0]:section_starts[1], :]
-    g = data[section_starts[1]:section_starts[2], :]
-    b = data[section_starts[2]:section_starts[3], :]
-    
-    # Create and fill the RGB array
-    rgb_data = np.zeros((h, w, 3))
-    
-    # Normalize each channel individually
-    for i, channel in enumerate([r, g, b]):
-        start_idx = section_starts[i]
-        end_idx = section_starts[i + 1]
-        norm = ImageNormalize(channel, interval=MinMaxInterval(), stretch=AsinhStretch())
-        rgb_data[start_idx:end_idx, :, i] = norm(channel)
-    
-    # No need for additional normalization
-    norm = None
 elif COLOR_MODE == 'false_color':
     # For false color, we can use the original data with a different colormap
     norm = ImageNormalize(data, interval=MinMaxInterval(), stretch=LogStretch())
 else:
-    raise ValueError("Invalid COLOR_MODE. Choose from 'grayscale', 'true_color', or 'false_color'.")
+    raise ValueError("Invalid COLOR_MODE. Choose from 'grayscale' or 'false_color'.")
 
 # 4. Display with WCSAxes, overlay celestial coordinates and scale bar
-fig = plt.figure(figsize=(20, 7))
+fig = plt.figure(figsize=(20, 8))
 
 # Create two subplots for different visualization modes
 visualizations = [
-    ('Grayscale', 'gray', LogStretch()),
+    ('NIRCam', 'gray', LogStretch()),
     ('False Color', 'inferno', LogStretch())
 ]
 
 for idx, (title, cmap, stretch) in enumerate(visualizations, 1):
-    ax = plt.subplot(1, 3, idx, projection=wcs)
-    
+    ax = plt.subplot(1, 2, idx, projection=wcs)
     norm = ImageNormalize(data, interval=MinMaxInterval(), stretch=stretch)
     im = ax.imshow(data, norm=norm, origin='lower', cmap=cmap)
-    
-    # Add coordinate labels and title
-    ax.set_xlabel('RA')
-    ax.set_ylabel('Dec')
-    ax.set_title(f'{title} View: {target}')
-    
-    # Add scale bar
-    scale_bar_length = 5  # arcseconds
-    scale_bar_length_deg = scale_bar_length / 3600
-    pix_scale = np.abs(wcs.wcs.cdelt[0])
-    scale_bar_length_pix = scale_bar_length_deg / pix_scale
-    
-    y_pos = int(data.shape[0] * 0.1)
-    x_start = int(data.shape[1] * 0.7)
-    x_end = x_start + int(scale_bar_length_pix)
-    
-    ax.plot([x_start, x_end], [y_pos, y_pos], '-w', linewidth=2)
-    ax.text(x_start + scale_bar_length_pix/2, y_pos + data.shape[0]*0.02,
-            f"{scale_bar_length}\"", color='white', ha='center', va='bottom')
-    
-    # Add colorbar for grayscale and false color
-    if title != 'True Color':
-        plt.colorbar(im, ax=ax, orientation='vertical', fraction=0.046, pad=0.04, label='Counts')
+ax.set_xlabel('RA')
+ax.set_ylabel('Dec')
+ax.set_title(f'JWST NIRCam Image: {target}')
 
-plt.tight_layout()
+# Add scale bar using a simpler method
+# Convert arcseconds to degrees for the scale bar
+scale_bar_length = 5  # arcseconds
+scale_bar_length_deg = scale_bar_length / 3600  # convert to degrees
+
+# Get the pixel scale from the WCS
+pix_scale = np.abs(wcs.wcs.cdelt[0])  # degrees per pixel
+scale_bar_length_pix = scale_bar_length_deg / pix_scale
+
+# Position the scale bar in the lower right corner
+y_pos = int(data.shape[0] * 0.1)  # 10% from bottom
+x_start = int(data.shape[1] * 0.7)  # 70% from left
+x_end = x_start + int(scale_bar_length_pix)
+
+# Draw the scale bar
+ax.plot([x_start, x_end], [y_pos, y_pos], '-w', linewidth=2)
+ax.text(x_start + scale_bar_length_pix/2, y_pos + data.shape[0]*0.02,
+        f"{scale_bar_length}\"", color='white', ha='center', va='bottom')
+
+plt.colorbar(im, ax=ax, orientation='vertical', fraction=0.046, pad=0.04, label='Counts')
 plt.show()
 
 # Helper function for parallel source detection

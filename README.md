@@ -12,8 +12,11 @@ This Python script provides tools for downloading, processing, and visualizing J
   - M16 (Pillars of Creation in Eagle Nebula)
   - Stephan's Quintet (Compact galaxy group HCG 92)
   - NGC 7469 (Southern Ring Nebula)
-- Image visualization with multiple modes:
-  - Grayscale view with logarithmic stretch
+  - NGC 1976 (Orion Nebula)
+  - Jupiter and its moons
+  - Abell 2744 (Pandora Cluster)
+- Image visualization with two modes:
+  - NIRCam view with grayscale and logarithmic stretch
   - False color view using 'inferno' colormap
 - Astronomical features:
   - WCS (World Coordinate System) coordinate overlay
@@ -43,7 +46,11 @@ Due to their large size (>100MB each), FITS files are not included in this repos
 - M16.fits (Pillars of Creation)
 - NGC_3324.fits (Carina Nebula)
 - SMACS_J0723.3-7327.fits (Galaxy cluster SMACS 0723)
-- Stephan's_Quintet.fits
+- Stephan's_Quintet.fits (HCG 92)
+- NGC_7469.fits (Southern Ring Nebula)
+- NGC_1976.fits (Orion Nebula)
+- Jupiter.fits (Jupiter and its moons)
+- Abell_2744.fits (Pandora Cluster)
 
 First-time users should simply run the script and select a target - the required files will be downloaded automatically.
 
@@ -69,6 +76,9 @@ python WEBB.py
    - PILLARS (Pillars of Creation in Eagle Nebula)
    - STEPHAN (Stephan's Quintet)
    - SOUTHERN (Southern Ring Nebula)
+   - ORION (Orion Nebula)
+   - JUPITER (Jupiter and its moons)
+   - PANDORA (Pandora Cluster)
 
 3. The script will:
    - Download the image if not cached
