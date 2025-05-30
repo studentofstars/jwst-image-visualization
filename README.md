@@ -35,6 +35,18 @@ This Python script provides tools for downloading, processing, and visualizing J
   - photutils
   - numpy
 
+## Data Files
+
+Due to their large size (>100MB each), FITS files are not included in this repository. The script will automatically download these files when needed and store them in the `cached_data` directory. The files include:
+
+- ESO_350-40.fits (Cartwheel Galaxy)
+- M16.fits (Pillars of Creation)
+- NGC_3324.fits (Carina Nebula)
+- SMACS_J0723.3-7327.fits (Galaxy cluster SMACS 0723)
+- Stephan's_Quintet.fits
+
+First-time users should simply run the script and select a target - the required files will be downloaded automatically.
+
 ## Installation
 
 1. Clone this repository
@@ -105,3 +117,4 @@ project/
 - The script automatically clips NaN and infinite values in the data
 - Downloaded files are cached for faster subsequent access
 - Memory management is implemented for handling large FITS files
+`````````
