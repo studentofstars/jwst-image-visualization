@@ -49,7 +49,6 @@ Due to their large size (>100MB each), FITS files are not included in this repos
 - Stephan's_Quintet.fits (HCG 92)
 - NGC_7469.fits (Southern Ring Nebula)
 - NGC_1976.fits (Orion Nebula)
-- Jupiter.fits (Jupiter and its moons)
 - Abell_2744.fits (Pandora Cluster)
 
 First-time users should simply run the script and select a target - the required files will be downloaded automatically.
