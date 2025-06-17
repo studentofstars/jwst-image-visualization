@@ -13,7 +13,6 @@ This Python script provides tools for downloading, processing, and visualizing J
   - Stephan's Quintet (Compact galaxy group HCG 92)
   - NGC 7469 (Southern Ring Nebula)
   - NGC 1976 (Orion Nebula)
-  - Jupiter and its moons
   - Abell 2744 (Pandora Cluster)
 - Image visualization with two modes:
   - NIRCam view with grayscale and logarithmic stretch
