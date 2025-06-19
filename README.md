@@ -7,7 +7,7 @@ This Python script provides tools for downloading, processing, and visualizing J
 - Download JWST calibrated images from MAST (Mikulski Archive for Space Telescopes)
 - Support for multiple target objects:
   - SMACS J0723.3-7327 (Galaxy cluster SMACS 0723)
-  - NGC 3324 (Carina Nebula)
+  - NGC 3372 (Carina Nebula)
   - ESO 350-40 (Cartwheel Galaxy)
   - M16 (Pillars of Creation in Eagle Nebula)
   - Stephan's Quintet (Compact galaxy group HCG 92)
