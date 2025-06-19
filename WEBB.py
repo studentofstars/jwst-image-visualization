@@ -29,7 +29,7 @@ TARGETS = {
         'description': 'Galaxy cluster SMACS 0723'
     },
     'CARINA': {
-        'name': 'NGC 3324',
+        'name': 'NGC 3372',
         'description': 'Carina Nebula'
     },
     'CARTWHEEL': {
